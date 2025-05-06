@@ -6,6 +6,9 @@ const urlsToCache = [
   '/src/main.tsx',
   '/src/index.css',
   '/favicon.ico',
+  '/icon-192x192.png',
+  '/icon-512x512.png',
+  '/manifest.json'
 ];
 
 // Install a service worker
@@ -17,6 +20,7 @@ self.addEventListener('install', event => {
         return cache.addAll(urlsToCache);
       })
   );
+  self.skipWaiting(); // Ensure the new service worker activates immediately
 });
 
 // Cache and return requests
@@ -28,9 +32,36 @@ self.addEventListener('fetch', event => {
         if (response) {
           return response;
         }
-        return fetch(event.request);
+        
+        // Clone the request because it's a stream that can only be consumed once
+        const fetchRequest = event.request.clone();
+        
+        // Try fetching from network and cache the response for future
+        return fetch(fetchRequest).then(
+          response => {
+            // Check if we received a valid response
+            if(!response || response.status !== 200 || response.type !== 'basic') {
+              return response;
+            }
+            
+            // Clone the response because it's a stream that can only be consumed once
+            const responseToCache = response.clone();
+            
+            caches.open(CACHE_NAME)
+              .then(cache => {
+                cache.put(event.request, responseToCache);
+              });
+              
+            return response;
+          }
+        ).catch(() => {
+          // If fetch fails (offline), try to serve the app shell
+          if (event.request.url.includes('index.html')) {
+            return caches.match('/');
+          }
+        });
       })
-  );
+    );
 });
 
 // Update a service worker
@@ -47,4 +78,6 @@ self.addEventListener('activate', event => {
       );
     })
   );
+  // Take control of all clients as soon as activated
+  self.clients.claim();
 });
